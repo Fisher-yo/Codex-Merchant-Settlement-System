@@ -6,6 +6,7 @@ dist/
 
 # Heavy transfer/design artifacts
 *.exe
+!/周结算操作台.exe
 *.msi
 *.zip
 *.rar

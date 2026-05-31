@@ -28,6 +28,11 @@ try {
   Write-Host ""
   Write-Host "错误日志：$logPath"
   Write-Host ""
-  Read-Host "按回车键关闭窗口"
+  if ($env:SETTLEMENT_CONSOLE_LAUNCHED_BY_EXE -eq '1') {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show("周结算操作台启动失败：`r`n$message`r`n`r`n错误日志：$logPath", '启动失败') | Out-Null
+  } else {
+    Read-Host "按回车键关闭窗口"
+  }
   exit 1
 }

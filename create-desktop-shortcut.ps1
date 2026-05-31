@@ -1,7 +1,9 @@
 ﻿$ErrorActionPreference = 'Stop'
 
 $projectRoot = $PSScriptRoot
-$launcherPath = Join-Path $projectRoot '启动周结算操作台.cmd'
+$exeLauncherPath = Join-Path $projectRoot '周结算操作台.exe'
+$cmdLauncherPath = Join-Path $projectRoot '启动周结算操作台.cmd'
+$launcherPath = if (Test-Path -LiteralPath $exeLauncherPath) { $exeLauncherPath } else { $cmdLauncherPath }
 
 if (-not (Test-Path -LiteralPath $launcherPath)) {
   throw "找不到启动文件：$launcherPath"
