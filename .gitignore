@@ -1,0 +1,49 @@
+# Root business data/source materials
+/aa*/
+
+# Build/package outputs
+dist/
+
+# Heavy transfer/design artifacts
+*.exe
+*.msi
+*.zip
+*.rar
+*.7z
+*.mp4
+*.mov
+*.avi
+*.psd
+
+# Runtime logs and local diagnostics
+*.log
+*-log.txt
+startup-error-log.txt
+
+# Local business notes
+目录整理规范.md
+软件使用说明.md
+项目使用入口.md
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor and tool caches
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Office temporary/lock files
+~$*
+*.asd
+*.wbk
+
+# PowerShell local history/cache
+ConsoleHost_history.txt
