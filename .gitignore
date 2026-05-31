@@ -1,6 +1,9 @@
 # Root business data/source materials
 /aa*/
 
+# Generated weekly settlement business data
+/workspace/04_商家周结算/20*/
+
 # Build/package outputs
 dist/
 

@@ -277,16 +277,12 @@ $openSummaryButton.Size = New-Object System.Drawing.Size(96, 36)
 $openTrackButton = New-Object System.Windows.Forms.Button
 $openTrackButton.Text = '确认台账'
 $openTrackButton.Size = New-Object System.Drawing.Size(96, 36)
-$openExceptionButton = New-Object System.Windows.Forms.Button
-$openExceptionButton.Text = '异常处理'
-$openExceptionButton.Size = New-Object System.Drawing.Size(96, 36)
 
 $actionPanel.Controls.Add($generateButton)
 $actionPanel.Controls.Add($openWeekButton)
 $actionPanel.Controls.Add($openSplitButton)
 $actionPanel.Controls.Add($openSummaryButton)
 $actionPanel.Controls.Add($openTrackButton)
-$actionPanel.Controls.Add($openExceptionButton)
 $main.Controls.Add($actionPanel, 0, 3)
 
 $logBox = New-Object System.Windows.Forms.TextBox
@@ -362,7 +358,6 @@ $openWeekButton.Add_Click({ Open-Directory -Path $currentDirText.Text.Trim() })
 $openSplitButton.Add_Click({ Open-Directory -Path (Join-Path $currentDirText.Text.Trim() '02_商家拆分对账单') })
 $openSummaryButton.Add_Click({ Open-Directory -Path (Join-Path $currentDirText.Text.Trim() '05_财务汇总') })
 $openTrackButton.Add_Click({ Open-Directory -Path (Join-Path $currentDirText.Text.Trim() '03_商家确认记录') })
-$openExceptionButton.Add_Click({ Open-Directory -Path (Join-Path $currentDirText.Text.Trim() '99_异常待处理') })
 
 $yearText.Add_TextChanged({ Set-CurrentWeekDir | Out-Null })
 $exportDateText.Add_TextChanged({

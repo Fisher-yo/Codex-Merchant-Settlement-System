@@ -21,6 +21,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 function Get-ZipText {
   param($Zip, [string]$Name)
   $entry = $Zip.GetEntry($Name)
+  if (-not $entry) {
+    $entry = $Zip.GetEntry($Name.Replace('/', '\'))
+  }
   if (-not $entry) { return $null }
   $reader = New-Object IO.StreamReader($entry.Open())
   try {
@@ -110,34 +113,227 @@ function Get-SettlementPeriodText {
   return $trimmed
 }
 
+function ConvertTo-DecimalValue {
+  param([string]$Text)
+  $normalized = ([string]$Text).Trim().Replace(',', '').Replace('￥', '').Replace('¥', '')
+  $num = 0
+  if ([decimal]::TryParse($normalized, [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$num)) {
+    return $num
+  }
+  if ([decimal]::TryParse($normalized, [ref]$num)) {
+    return $num
+  }
+  return 0
+}
+
+function New-WorksheetXml {
+  param(
+    [Parameter(Mandatory = $true)]
+    [array]$Rows
+  )
+
+  $columns = @($Rows[0].PSObject.Properties.Name)
+
+  $columnWidths = @()
+  for ($c = 0; $c -lt $columns.Count; $c++) {
+    $maxLen = [Math]::Max(10, (Get-TextDisplayWidth -Text ([string]$columns[$c])))
+    foreach ($row in $Rows) {
+      $value = [string]$row.PSObject.Properties[$columns[$c]].Value
+      foreach ($part in ($value -split "(`r`n|`n|`r)")) {
+        $partWidth = Get-TextDisplayWidth -Text $part
+        if ($partWidth -gt $maxLen) { $maxLen = $partWidth }
+      }
+    }
+    $columnWidths += [Math]::Min(36, [Math]::Max(10, $maxLen + 2))
+  }
+
+  $sheet = New-Object Text.StringBuilder
+  [void]$sheet.AppendLine('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+  [void]$sheet.AppendLine('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">')
+  [void]$sheet.AppendLine('  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
+  [void]$sheet.AppendLine('  <cols>')
+  for ($c = 0; $c -lt $columns.Count; $c++) {
+    $idx = $c + 1
+    [void]$sheet.AppendLine("    <col min=""$idx"" max=""$idx"" width=""$($columnWidths[$c])"" customWidth=""1""/>")
+  }
+  [void]$sheet.AppendLine('  </cols>')
+  [void]$sheet.AppendLine('  <sheetData>')
+
+  [void]$sheet.AppendLine('    <row r="1" ht="22" customHeight="1">')
+  for ($c = 0; $c -lt $columns.Count; $c++) {
+    $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))1"
+    [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""1""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $columns[$c])</t></is></c>")
+  }
+  [void]$sheet.AppendLine('    </row>')
+
+  for ($r = 0; $r -lt $Rows.Count; $r++) {
+    $rowIndex = $r + 2
+    $maxLines = 1
+    $cellXml = New-Object Text.StringBuilder
+    for ($c = 0; $c -lt $columns.Count; $c++) {
+      $value = [string]$Rows[$r].PSObject.Properties[$columns[$c]].Value
+      $estimatedLines = 1
+      foreach ($part in ($value -split "(`r`n|`n|`r)")) {
+        $partWidth = Get-TextDisplayWidth -Text $part
+        $partLines = [Math]::Max(1, [Math]::Ceiling($partWidth / [Math]::Max(1, $columnWidths[$c] - 1)))
+        if ($partLines -gt $estimatedLines) { $estimatedLines = $partLines }
+      }
+      if ($estimatedLines -gt $maxLines) { $maxLines = $estimatedLines }
+      $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))$rowIndex"
+      [void]$cellXml.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""0""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $value)</t></is></c>")
+    }
+    $height = [Math]::Min(220, [Math]::Max(22, 18 * $maxLines))
+    [void]$sheet.AppendLine("    <row r=""$rowIndex"" ht=""$height"" customHeight=""1"">")
+    [void]$sheet.Append($cellXml.ToString())
+    [void]$sheet.AppendLine('    </row>')
+  }
+
+  [void]$sheet.AppendLine('  </sheetData>')
+  [void]$sheet.AppendLine('  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>')
+  [void]$sheet.AppendLine('</worksheet>')
+  return $sheet.ToString()
+}
+
+function New-SettlementAnalysisWorksheetXml {
+  param(
+    [Parameter(Mandatory = $true)]
+    [array]$SettlementRows,
+    [Parameter(Mandatory = $true)]
+    [array]$PivotRows
+  )
+
+  $columns = @('结算周期', '商家代码', '商家名称', '总结算金额')
+  $pivotColumns = @('商品编号', 'SKU ID（规格）', '单价', '订单数量汇总', '总结算金额汇总')
+
+  $columnWidths = @()
+  $maxColumnCount = [Math]::Max($columns.Count, $pivotColumns.Count)
+  for ($c = 0; $c -lt $maxColumnCount; $c++) {
+    $maxLen = 10
+
+    if ($c -lt $columns.Count) {
+      $summaryHeaderWidth = Get-TextDisplayWidth -Text ([string]$columns[$c])
+      if ($summaryHeaderWidth -gt $maxLen) { $maxLen = $summaryHeaderWidth }
+      foreach ($row in $SettlementRows) {
+        $value = [string]$row.PSObject.Properties[$columns[$c]].Value
+        $valueWidth = Get-TextDisplayWidth -Text $value
+        if ($valueWidth -gt $maxLen) { $maxLen = $valueWidth }
+      }
+    }
+
+    if ($c -lt $pivotColumns.Count) {
+      $pivotHeaderWidth = Get-TextDisplayWidth -Text ([string]$pivotColumns[$c])
+      if ($pivotHeaderWidth -gt $maxLen) { $maxLen = $pivotHeaderWidth }
+      foreach ($row in $PivotRows) {
+        $value = [string]$row.PSObject.Properties[$pivotColumns[$c]].Value
+        $valueWidth = Get-TextDisplayWidth -Text $value
+        if ($valueWidth -gt $maxLen) { $maxLen = $valueWidth }
+      }
+    }
+
+    $columnWidths += [Math]::Min(80, [Math]::Max(12, $maxLen + 3))
+  }
+
+  $fixedRowHeight = 24
+
+  $sheet = New-Object Text.StringBuilder
+  [void]$sheet.AppendLine('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+  [void]$sheet.AppendLine('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">')
+  [void]$sheet.AppendLine('  <sheetViews><sheetView workbookViewId="0"/></sheetViews>')
+  [void]$sheet.AppendLine('  <cols>')
+  for ($c = 0; $c -lt $columnWidths.Count; $c++) {
+    $idx = $c + 1
+    [void]$sheet.AppendLine("    <col min=""$idx"" max=""$idx"" width=""$($columnWidths[$c])"" customWidth=""1""/>")
+  }
+  [void]$sheet.AppendLine('  </cols>')
+  [void]$sheet.AppendLine('  <sheetData>')
+
+  [void]$sheet.AppendLine("    <row r=""1"" ht=""$fixedRowHeight"" customHeight=""1"">")
+  [void]$sheet.AppendLine('      <c r="A1" t="inlineStr" s="1"><is><t xml:space="preserve">结算汇总</t></is></c>')
+  [void]$sheet.AppendLine('    </row>')
+
+  [void]$sheet.AppendLine("    <row r=""2"" ht=""$fixedRowHeight"" customHeight=""1"">")
+  for ($c = 0; $c -lt $columns.Count; $c++) {
+    $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))2"
+    [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""1""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $columns[$c])</t></is></c>")
+  }
+  [void]$sheet.AppendLine('    </row>')
+
+  for ($r = 0; $r -lt $SettlementRows.Count; $r++) {
+    $rowIndex = $r + 3
+    [void]$sheet.AppendLine("    <row r=""$rowIndex"" ht=""$fixedRowHeight"" customHeight=""1"">")
+    for ($c = 0; $c -lt $columns.Count; $c++) {
+      $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))$rowIndex"
+      $value = [string]$SettlementRows[$r].PSObject.Properties[$columns[$c]].Value
+      [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""0""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $value)</t></is></c>")
+    }
+    [void]$sheet.AppendLine('    </row>')
+  }
+
+  $pivotTitleRow = $SettlementRows.Count + 5
+  [void]$sheet.AppendLine("    <row r=""$pivotTitleRow"" ht=""$fixedRowHeight"" customHeight=""1"">")
+  [void]$sheet.AppendLine("      <c r=""A$pivotTitleRow"" t=""inlineStr"" s=""1""><is><t xml:space=""preserve"">商品数据透视</t></is></c>")
+  [void]$sheet.AppendLine('    </row>')
+
+  $pivotHeaderRow = $pivotTitleRow + 1
+  [void]$sheet.AppendLine("    <row r=""$pivotHeaderRow"" ht=""$fixedRowHeight"" customHeight=""1"">")
+  for ($c = 0; $c -lt $pivotColumns.Count; $c++) {
+    $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))$pivotHeaderRow"
+    [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""1""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $pivotColumns[$c])</t></is></c>")
+  }
+  [void]$sheet.AppendLine('    </row>')
+
+  for ($r = 0; $r -lt $PivotRows.Count; $r++) {
+    $rowIndex = $pivotHeaderRow + $r + 1
+    [void]$sheet.AppendLine("    <row r=""$rowIndex"" ht=""$fixedRowHeight"" customHeight=""1"">")
+    for ($c = 0; $c -lt $pivotColumns.Count; $c++) {
+      $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))$rowIndex"
+      $value = [string]$PivotRows[$r].PSObject.Properties[$pivotColumns[$c]].Value
+      [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""0""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $value)</t></is></c>")
+    }
+    [void]$sheet.AppendLine('    </row>')
+  }
+
+  [void]$sheet.AppendLine('  </sheetData>')
+  [void]$sheet.AppendLine('  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>')
+  [void]$sheet.AppendLine('</worksheet>')
+  return $sheet.ToString()
+}
+
 function Write-FormattedXlsx {
   param(
     [Parameter(Mandatory = $true)]
     [array]$Rows,
     [Parameter(Mandatory = $true)]
-    [string]$Path
+    [string]$Path,
+    [string]$SheetName = "对账单",
+    [array]$AdditionalSheets = @()
   )
 
   if ($Rows.Count -eq 0) { return $false }
 
   $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("settlement_xlsx_" + [guid]::NewGuid().ToString('N'))
   try {
-    $columns = @($Rows[0].PSObject.Properties.Name)
+    New-Item -ItemType Directory -Force -Path $tempRoot, (Join-Path $tempRoot '_rels'), (Join-Path $tempRoot 'xl'), (Join-Path $tempRoot 'xl\_rels'), (Join-Path $tempRoot 'xl\worksheets') | Out-Null
 
-    $columnWidths = @()
-    for ($c = 0; $c -lt $columns.Count; $c++) {
-      $maxLen = [Math]::Max(10, (Get-TextDisplayWidth -Text ([string]$columns[$c])))
-      foreach ($row in $Rows) {
-        $value = [string]$row.PSObject.Properties[$columns[$c]].Value
-        foreach ($part in ($value -split "(`r`n|`n|`r)")) {
-          $partWidth = Get-TextDisplayWidth -Text $part
-          if ($partWidth -gt $maxLen) { $maxLen = $partWidth }
-        }
+    $sheetSpecs = @([PSCustomObject]@{ Name = $SheetName; Rows = $Rows; WorksheetXml = $null })
+    foreach ($sheetSpec in $AdditionalSheets) {
+      if ($sheetSpec.WorksheetXml) {
+        $sheetSpecs += [PSCustomObject]@{ Name = [string]$sheetSpec.Name; Rows = $null; WorksheetXml = [string]$sheetSpec.WorksheetXml }
+      } elseif ($sheetSpec.Rows -and $sheetSpec.Rows.Count -gt 0) {
+        $sheetSpecs += [PSCustomObject]@{ Name = [string]$sheetSpec.Name; Rows = $sheetSpec.Rows; WorksheetXml = $null }
       }
-      $columnWidths += [Math]::Min(36, [Math]::Max(10, $maxLen + 2))
     }
 
-    New-Item -ItemType Directory -Force -Path $tempRoot, (Join-Path $tempRoot '_rels'), (Join-Path $tempRoot 'xl'), (Join-Path $tempRoot 'xl\_rels'), (Join-Path $tempRoot 'xl\worksheets') | Out-Null
+    $sheetContentTypes = New-Object Text.StringBuilder
+    $workbookSheets = New-Object Text.StringBuilder
+    $workbookRelationships = New-Object Text.StringBuilder
+    for ($i = 0; $i -lt $sheetSpecs.Count; $i++) {
+      $sheetNo = $i + 1
+      [void]$sheetContentTypes.AppendLine("  <Override PartName=""/xl/worksheets/sheet$sheetNo.xml"" ContentType=""application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml""/>")
+      [void]$workbookSheets.AppendLine("    <sheet name=""$(ConvertTo-XmlText $sheetSpecs[$i].Name)"" sheetId=""$sheetNo"" r:id=""rId$sheetNo""/>")
+      [void]$workbookRelationships.AppendLine("  <Relationship Id=""rId$sheetNo"" Type=""http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"" Target=""worksheets/sheet$sheetNo.xml""/>")
+    }
+    $stylesRelationshipId = "rId$($sheetSpecs.Count + 1)"
 
     $contentTypes = @'
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -145,10 +341,10 @@ function Write-FormattedXlsx {
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+SHEET_CONTENT_TYPES
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>
-'@
+'@.Replace('SHEET_CONTENT_TYPES', $sheetContentTypes.ToString().TrimEnd())
 
     $packageRels = @'
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -161,18 +357,18 @@ function Write-FormattedXlsx {
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="对账单" sheetId="1" r:id="rId1"/>
+WORKBOOK_SHEETS
   </sheets>
 </workbook>
-'@
+'@.Replace('WORKBOOK_SHEETS', $workbookSheets.ToString().TrimEnd())
 
     $workbookRels = @'
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+WORKBOOK_RELATIONSHIPS
+  <Relationship Id="STYLES_RELATIONSHIP_ID" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>
-'@
+'@.Replace('WORKBOOK_RELATIONSHIPS', $workbookRelationships.ToString().TrimEnd()).Replace('STYLES_RELATIONSHIP_ID', $stylesRelationshipId)
 
     $stylesXml = @'
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -189,64 +385,27 @@ function Write-FormattedXlsx {
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
   <cellXfs count="2">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>
 '@
-
-    $sheet = New-Object Text.StringBuilder
-    [void]$sheet.AppendLine('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-    [void]$sheet.AppendLine('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">')
-    [void]$sheet.AppendLine('  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
-    [void]$sheet.AppendLine('  <cols>')
-    for ($c = 0; $c -lt $columns.Count; $c++) {
-      $idx = $c + 1
-      [void]$sheet.AppendLine("    <col min=""$idx"" max=""$idx"" width=""$($columnWidths[$c])"" customWidth=""1""/>")
-    }
-    [void]$sheet.AppendLine('  </cols>')
-    [void]$sheet.AppendLine('  <sheetData>')
-
-    [void]$sheet.AppendLine('    <row r="1" ht="22" customHeight="1">')
-    for ($c = 0; $c -lt $columns.Count; $c++) {
-      $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))1"
-      [void]$sheet.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""1""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $columns[$c])</t></is></c>")
-    }
-    [void]$sheet.AppendLine('    </row>')
-
-    for ($r = 0; $r -lt $Rows.Count; $r++) {
-      $rowIndex = $r + 2
-      $maxLines = 1
-      $cellXml = New-Object Text.StringBuilder
-      for ($c = 0; $c -lt $columns.Count; $c++) {
-        $value = [string]$Rows[$r].PSObject.Properties[$columns[$c]].Value
-        $estimatedLines = 1
-        foreach ($part in ($value -split "(`r`n|`n|`r)")) {
-          $partWidth = Get-TextDisplayWidth -Text $part
-          $partLines = [Math]::Max(1, [Math]::Ceiling($partWidth / [Math]::Max(1, $columnWidths[$c] - 1)))
-          if ($partLines -gt $estimatedLines) { $estimatedLines = $partLines }
-        }
-        if ($estimatedLines -gt $maxLines) { $maxLines = $estimatedLines }
-        $cellRef = "$(ConvertTo-ExcelColumnName ($c + 1))$rowIndex"
-        [void]$cellXml.AppendLine("      <c r=""$cellRef"" t=""inlineStr"" s=""0""><is><t xml:space=""preserve"">$(ConvertTo-XmlText $value)</t></is></c>")
-      }
-      $height = [Math]::Min(220, [Math]::Max(22, 18 * $maxLines))
-      [void]$sheet.AppendLine("    <row r=""$rowIndex"" ht=""$height"" customHeight=""1"">")
-      [void]$sheet.Append($cellXml.ToString())
-      [void]$sheet.AppendLine('    </row>')
-    }
-
-    [void]$sheet.AppendLine('  </sheetData>')
-    [void]$sheet.AppendLine('  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>')
-    [void]$sheet.AppendLine('</worksheet>')
 
     [IO.File]::WriteAllText((Join-Path $tempRoot '[Content_Types].xml'), $contentTypes, [Text.Encoding]::UTF8)
     [IO.File]::WriteAllText((Join-Path $tempRoot '_rels\.rels'), $packageRels, [Text.Encoding]::UTF8)
     [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\workbook.xml'), $workbookXml, [Text.Encoding]::UTF8)
     [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\_rels\workbook.xml.rels'), $workbookRels, [Text.Encoding]::UTF8)
     [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\styles.xml'), $stylesXml, [Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\worksheets\sheet1.xml'), $sheet.ToString(), [Text.Encoding]::UTF8)
+    for ($i = 0; $i -lt $sheetSpecs.Count; $i++) {
+      $sheetNo = $i + 1
+      if ($sheetSpecs[$i].WorksheetXml) {
+        $worksheetXml = [string]$sheetSpecs[$i].WorksheetXml
+      } else {
+        $worksheetXml = New-WorksheetXml -Rows $sheetSpecs[$i].Rows
+      }
+      [IO.File]::WriteAllText((Join-Path $tempRoot "xl\worksheets\sheet$sheetNo.xml"), $worksheetXml, [Text.Encoding]::UTF8)
+    }
 
     if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
     [IO.Compression.ZipFile]::CreateFromDirectory($tempRoot, $Path)
@@ -348,13 +507,36 @@ if ($tableRows.Count -lt 2) {
 $headers = $tableRows[0]
 $supplierIndex = [array]::IndexOf($headers, $SupplierColumn)
 $amountIndex = [array]::IndexOf($headers, $AmountColumn)
+$productIndex = [array]::IndexOf($headers, '商品编号')
+$skuIndex = [array]::IndexOf($headers, 'SKU ID（规格）')
+$quantityIndex = [array]::IndexOf($headers, '订单数量')
+$unitPriceIndex = [array]::IndexOf($headers, '进货单价')
 
 if ($supplierIndex -lt 0) {
   throw "找不到供应商字段：$SupplierColumn。当前表头：$($headers -join ', ')"
 }
 
 if ($amountIndex -lt 0) {
-  Write-Warning "找不到金额字段：$AmountColumn，将只拆分不汇总金额。"
+  foreach ($candidate in @('预计结算金额', '预计结账金额')) {
+    $candidateIndex = [array]::IndexOf($headers, $candidate)
+    if ($candidateIndex -ge 0) {
+      $AmountColumn = $candidate
+      $amountIndex = $candidateIndex
+      break
+    }
+  }
+}
+
+if ($amountIndex -lt 0) {
+  Write-Warning "找不到金额字段：$AmountColumn / 预计结算金额 / 预计结账金额，将只拆分不汇总金额。"
+}
+
+if ($productIndex -lt 0 -or $skuIndex -lt 0 -or $quantityIndex -lt 0) {
+  Write-Warning "找不到商品透视所需字段：商品编号、SKU ID（规格）、订单数量。商家对账单将不生成商品数据透视页。"
+}
+
+if ($unitPriceIndex -lt 0) {
+  Write-Warning "找不到单价字段：进货单价。商品数据透视页的单价列将留空。"
 }
 
 $supplierNameMap = @{}
@@ -464,25 +646,64 @@ foreach ($supplier in ($groups.Keys | Sort-Object)) {
   $xlsxFilePath = Join-Path $splitXlsxDir $xlsxFileName
   $rows = $groups[$supplier]
   Write-CsvUtf8Bom -Rows $rows -Path $csvFilePath
-  $hasFormattedXlsx = Write-FormattedXlsx -Rows $rows -Path $xlsxFilePath
-  $fileName = if ($hasFormattedXlsx) { "xlsx格式\$xlsxFileName" } else { "csv格式\$csvFileName" }
 
   $totalAmount = 0
   if ($amountIndex -ge 0) {
     foreach ($row in $rows) {
       $raw = [string]$row.$AmountColumn
-      $num = 0
-      if ([decimal]::TryParse($raw, [ref]$num)) {
-        $totalAmount += $num
-      }
+      $totalAmount += ConvertTo-DecimalValue -Text $raw
     }
   }
+
+  $settlementRows = @(
+    [PSCustomObject][ordered]@{
+      结算周期 = $settlementPeriod
+      商家代码 = $supplier
+      商家名称 = $supplierName
+      总结算金额 = $totalAmount
+    }
+  )
+
+  $pivotRows = @()
+  if ($productIndex -ge 0 -and $skuIndex -ge 0 -and $quantityIndex -ge 0) {
+    $pivot = @{}
+    foreach ($row in $rows) {
+      $productId = ([string]$row.'商品编号').Trim()
+      $skuId = ([string]$row.'SKU ID（规格）').Trim()
+      $key = "$productId`t$skuId"
+      if (-not $pivot.ContainsKey($key)) {
+        $pivot[$key] = [PSCustomObject][ordered]@{
+          商品编号 = $productId
+          'SKU ID（规格）' = $skuId
+          单价 = ''
+          订单数量汇总 = [decimal]0
+          总结算金额汇总 = [decimal]0
+        }
+      }
+      if ($unitPriceIndex -ge 0 -and [string]::IsNullOrWhiteSpace([string]$pivot[$key].单价)) {
+        $pivot[$key].单价 = [string]$row.'进货单价'
+      }
+      $pivot[$key].订单数量汇总 += ConvertTo-DecimalValue -Text ([string]$row.'订单数量')
+      if ($amountIndex -ge 0) {
+        $pivot[$key].总结算金额汇总 += ConvertTo-DecimalValue -Text ([string]$row.$AmountColumn)
+      }
+    }
+    $pivotRows = @($pivot.Values | Sort-Object 商品编号, 'SKU ID（规格）')
+  }
+
+  $analysisSheetXml = New-SettlementAnalysisWorksheetXml -SettlementRows $settlementRows -PivotRows $pivotRows
+  $extraSheets = @(
+    [PSCustomObject]@{ Name = '结算与商品汇总'; WorksheetXml = $analysisSheetXml }
+  )
+
+  $hasFormattedXlsx = Write-FormattedXlsx -Rows $rows -Path $xlsxFilePath -AdditionalSheets $extraSheets
+  $fileName = if ($hasFormattedXlsx) { "xlsx格式\$xlsxFileName" } else { "csv格式\$csvFileName" }
 
   $summaryRows += [PSCustomObject][ordered]@{
     结算周期 = $settlementPeriod
     商家代码 = $supplier
     商家名称 = $supplierName
-    预计结账金额合计 = $totalAmount
+    总结算金额 = $totalAmount
     对账确认状态 = '待确认'
     发票状态 = '未收票'
     付款状态 = '待付款'
