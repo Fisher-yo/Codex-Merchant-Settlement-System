@@ -139,42 +139,194 @@ function Generate-Settlement {
   Add-Log "结算结果已生成。"
 }
 
+function New-UiColor {
+  param([int]$R, [int]$G, [int]$B)
+  return [System.Drawing.Color]::FromArgb($R, $G, $B)
+}
+
+function Set-ControlMargin {
+  param(
+    [System.Windows.Forms.Control]$Control,
+    [int]$Left = 0,
+    [int]$Top = 0,
+    [int]$Right = 0,
+    [int]$Bottom = 0
+  )
+  $Control.Margin = New-Object System.Windows.Forms.Padding($Left, $Top, $Right, $Bottom)
+}
+
+function Set-ModernButton {
+  param(
+    [System.Windows.Forms.Button]$Button,
+    [System.Drawing.Color]$BackColor,
+    [System.Drawing.Color]$ForeColor,
+    [System.Drawing.Color]$BorderColor,
+    [switch]$Strong
+  )
+
+  $Button.FlatStyle = 'Flat'
+  $Button.BackColor = $BackColor
+  $Button.ForeColor = $ForeColor
+  $Button.FlatAppearance.BorderColor = $BorderColor
+  $Button.FlatAppearance.BorderSize = 1
+  $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $Button.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', $(if ($Strong) { 10 } else { 9 }), $(if ($Strong) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }))
+  $Button.UseVisualStyleBackColor = $false
+  $Button.Add_MouseEnter({
+    $this.FlatAppearance.BorderColor = $colorPrimary
+    $this.BackColor = Blend-UiColor -A $this.BackColor -B $colorPrimary -Percent 8
+  })
+  $Button.Add_MouseLeave({
+    $this.BackColor = $this.Tag.BackColor
+    $this.FlatAppearance.BorderColor = $this.Tag.BorderColor
+  })
+  $Button.Tag = [pscustomobject]@{
+    BackColor = $BackColor
+    BorderColor = $BorderColor
+  }
+}
+
+function Blend-UiColor {
+  param(
+    [System.Drawing.Color]$A,
+    [System.Drawing.Color]$B,
+    [int]$Percent
+  )
+
+  $ratio = [Math]::Max(0, [Math]::Min(100, $Percent)) / 100
+  return [System.Drawing.Color]::FromArgb(
+    [int]($A.R + (($B.R - $A.R) * $ratio)),
+    [int]($A.G + (($B.G - $A.G) * $ratio)),
+    [int]($A.B + (($B.B - $A.B) * $ratio))
+  )
+}
+
+function Set-AppTextBox {
+  param(
+    [System.Windows.Forms.TextBox]$TextBox,
+    [switch]$ReadOnly
+  )
+
+  $TextBox.BorderStyle = 'FixedSingle'
+  $TextBox.BackColor = $(if ($ReadOnly) { $colorFieldMuted } else { $colorField })
+  $TextBox.ForeColor = $(if ($ReadOnly) { $colorMuted } else { $colorInk })
+  $TextBox.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9.5)
+}
+
+function Add-PanelBorderPaint {
+  param(
+    [System.Windows.Forms.Control]$Panel,
+    [System.Drawing.Color]$BorderColor = $colorLine
+  )
+
+  $Panel.Tag = [pscustomobject]@{
+    BorderColor = $BorderColor
+  }
+  $Panel.Add_Paint({
+    param($sender, $event)
+    $rect = New-Object System.Drawing.Rectangle(0, 0, ($sender.Width - 1), ($sender.Height - 1))
+    $pen = New-Object System.Drawing.Pen($sender.Tag.BorderColor, 1)
+    $event.Graphics.DrawRectangle($pen, $rect)
+    $pen.Dispose()
+  })
+}
+
+$colorPage = New-UiColor 246 248 251
+$colorCard = New-UiColor 255 255 255
+$colorCardAlt = New-UiColor 255 255 255
+$colorInk = New-UiColor 31 41 55
+$colorMuted = New-UiColor 100 116 139
+$colorLine = New-UiColor 218 226 236
+$colorPrimary = New-UiColor 37 99 235
+$colorPrimaryDark = New-UiColor 29 78 216
+$colorPrimarySoft = New-UiColor 239 246 255
+$colorAccent = New-UiColor 37 99 235
+$colorCyan = New-UiColor 37 99 235
+$colorCyanDim = New-UiColor 191 219 254
+$colorGreen = New-UiColor 22 163 74
+$colorField = New-UiColor 255 255 255
+$colorFieldMuted = New-UiColor 248 250 252
+$colorLog = New-UiColor 248 250 252
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '周结算操作台'
 $form.StartPosition = 'CenterScreen'
-$form.Size = New-Object System.Drawing.Size(920, 680)
-$form.MinimumSize = New-Object System.Drawing.Size(860, 620)
+$form.Size = New-Object System.Drawing.Size(1000, 720)
+$form.MinimumSize = New-Object System.Drawing.Size(920, 660)
 $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+$form.BackColor = $colorPage
+$form.ForeColor = $colorInk
+$iconPath = Join-Path (Split-Path -Parent $settlementRoot) 'assets\settlement-console.ico'
+if (Test-Path -LiteralPath $iconPath) {
+  $form.Icon = New-Object System.Drawing.Icon($iconPath)
+}
 
 $main = New-Object System.Windows.Forms.TableLayoutPanel
 $main.Dock = 'Fill'
-$main.Padding = New-Object System.Windows.Forms.Padding(16)
+$main.Padding = New-Object System.Windows.Forms.Padding(22)
+$main.BackColor = $colorPage
 $main.ColumnCount = 1
 $main.RowCount = 5
-$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 92))) | Out-Null
-$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 82))) | Out-Null
-$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 138))) | Out-Null
-$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 64))) | Out-Null
+$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 110))) | Out-Null
+$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 106))) | Out-Null
+$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 160))) | Out-Null
+$main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 66))) | Out-Null
 $main.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
 $form.Controls.Add($main)
 
 $titlePanel = New-Object System.Windows.Forms.Panel
 $titlePanel.Dock = 'Fill'
+$titlePanel.BackColor = $colorPage
+$titlePanel.Add_Paint({
+  param($sender, $event)
+  $linePen = New-Object System.Drawing.Pen($colorLine, 1)
+  $event.Graphics.DrawLine($linePen, 0, ($sender.Height - 10), $sender.Width, ($sender.Height - 10))
+  $linePen.Dispose()
+})
 $title = New-Object System.Windows.Forms.Label
-$title.Text = '商家周结算'
-$title.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 18, [System.Drawing.FontStyle]::Bold)
+$title.Text = '商家周结算操作台'
+$title.ForeColor = $colorInk
+$title.BackColor = [System.Drawing.Color]::Transparent
+$title.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 22, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize = $true
-$title.Location = New-Object System.Drawing.Point(0, 0)
+$title.Location = New-Object System.Drawing.Point(2, 8)
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = '按“后台导出日期 - 7 天”生成对账日期，拖入后台总对账单，一键生成商家对账单、财务汇总表和跟进台账。'
+$subtitle.Text = '确认周期、导入后台总对账单，然后生成商家对账单、财务汇总表和确认台账。'
+$subtitle.ForeColor = $colorMuted
+$subtitle.BackColor = [System.Drawing.Color]::Transparent
 $subtitle.AutoSize = $true
-$subtitle.Location = New-Object System.Drawing.Point(2, 44)
+$subtitle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 10)
+$subtitle.Location = New-Object System.Drawing.Point(4, 54)
+$badge = New-Object System.Windows.Forms.Label
+$badge.Text = '本地周结算工具'
+$badge.ForeColor = $colorPrimaryDark
+$badge.BackColor = $colorPrimarySoft
+$badge.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+$badge.AutoSize = $true
+$badge.Padding = New-Object System.Windows.Forms.Padding(9, 4, 9, 4)
+$badge.Location = New-Object System.Drawing.Point(5, 80)
+$statusBadge = New-Object System.Windows.Forms.Label
+$statusBadge.Text = 'Windows'
+$statusBadge.ForeColor = $colorMuted
+$statusBadge.BackColor = $colorPage
+$statusBadge.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+$statusBadge.AutoSize = $true
+$statusBadge.Padding = New-Object System.Windows.Forms.Padding(8, 4, 8, 4)
+$statusBadge.Anchor = 'Top,Right'
+$statusBadge.Location = New-Object System.Drawing.Point(830, 18)
 $titlePanel.Controls.Add($title)
 $titlePanel.Controls.Add($subtitle)
+$titlePanel.Controls.Add($badge)
+$titlePanel.Controls.Add($statusBadge)
+$titlePanel.Add_SizeChanged({
+  $statusBadge.Left = [Math]::Max(620, $titlePanel.ClientSize.Width - $statusBadge.Width - 22)
+})
 $main.Controls.Add($titlePanel, 0, 0)
 
 $periodPanel = New-Object System.Windows.Forms.TableLayoutPanel
 $periodPanel.Dock = 'Fill'
+$periodPanel.BackColor = $colorCard
+$periodPanel.Padding = New-Object System.Windows.Forms.Padding(18, 14, 18, 12)
 $periodPanel.ColumnCount = 7
 $periodPanel.RowCount = 2
 $periodPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 48))) | Out-Null
@@ -184,38 +336,47 @@ $periodPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([Syst
 $periodPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 72))) | Out-Null
 $periodPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 150))) | Out-Null
 $periodPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+Add-PanelBorderPaint -Panel $periodPanel -BorderColor $colorLine
 
 $yearLabel = New-Object System.Windows.Forms.Label
 $yearLabel.Text = '年份'
 $yearLabel.TextAlign = 'MiddleLeft'
 $yearLabel.Dock = 'Fill'
+$yearLabel.ForeColor = $colorMuted
 $yearText = New-Object System.Windows.Forms.TextBox
 $yearText.Text = '2026'
 $yearText.Dock = 'Fill'
+Set-AppTextBox -TextBox $yearText
 
 $exportDateLabel = New-Object System.Windows.Forms.Label
 $exportDateLabel.Text = '导出日期'
 $exportDateLabel.TextAlign = 'MiddleLeft'
 $exportDateLabel.Dock = 'Fill'
+$exportDateLabel.ForeColor = $colorMuted
 $exportDateText = New-Object System.Windows.Forms.TextBox
 $exportDateText.Text = (Get-Date).ToString('yyyy-MM-dd')
 $exportDateText.Dock = 'Fill'
+Set-AppTextBox -TextBox $exportDateText
 
 $periodLabel = New-Object System.Windows.Forms.Label
 $periodLabel.Text = '对账日期'
 $periodLabel.TextAlign = 'MiddleLeft'
 $periodLabel.Dock = 'Fill'
+$periodLabel.ForeColor = $colorMuted
 $periodText = New-Object System.Windows.Forms.TextBox
 $periodText.Text = Convert-ToDateText -Date (Get-Date).AddDays(-7)
 $periodText.Dock = 'Fill'
+Set-AppTextBox -TextBox $periodText
 
 $createButton = New-Object System.Windows.Forms.Button
-$createButton.Text = '新建本周结算'
+$createButton.Text = '准备本周目录'
 $createButton.Dock = 'Fill'
+Set-ModernButton -Button $createButton -BackColor $colorPrimary -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorPrimaryDark -Strong
 
 $currentDirText = New-Object System.Windows.Forms.TextBox
 $currentDirText.Dock = 'Fill'
 $currentDirText.ReadOnly = $true
+Set-AppTextBox -TextBox $currentDirText -ReadOnly
 
 $periodPanel.Controls.Add($yearLabel, 0, 0)
 $periodPanel.Controls.Add($yearText, 1, 0)
@@ -230,53 +391,76 @@ $main.Controls.Add($periodPanel, 0, 1)
 
 $dropPanel = New-Object System.Windows.Forms.Panel
 $dropPanel.Dock = 'Fill'
-$dropPanel.BorderStyle = 'FixedSingle'
+$dropPanel.BorderStyle = 'None'
 $dropPanel.AllowDrop = $true
+$dropPanel.BackColor = $colorCardAlt
+Add-PanelBorderPaint -Panel $dropPanel -BorderColor $colorLine
 $dropTitle = New-Object System.Windows.Forms.Label
 $dropTitle.Text = '拖入后台总对账单'
 $dropTitle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 14, [System.Drawing.FontStyle]::Bold)
+$dropTitle.ForeColor = $colorInk
 $dropTitle.AutoSize = $true
-$dropTitle.Location = New-Object System.Drawing.Point(24, 20)
+$dropTitle.Location = New-Object System.Drawing.Point(28, 24)
 $dropTip = New-Object System.Windows.Forms.Label
-$dropTip.Text = '支持 .xlsx 文件。拖入后会复制到本周目录的 01_后台总对账单。'
+$dropTip.Text = '支持 .xlsx 文件，导入后自动复制到本周工作包的 01_后台总对账单。'
+$dropTip.ForeColor = $colorMuted
 $dropTip.AutoSize = $true
-$dropTip.Location = New-Object System.Drawing.Point(26, 56)
+$dropTip.Location = New-Object System.Drawing.Point(30, 62)
 $inputFileText = New-Object System.Windows.Forms.TextBox
 $inputFileText.ReadOnly = $true
 $inputFileText.Anchor = 'Left,Right,Bottom'
-$inputFileText.Location = New-Object System.Drawing.Point(24, 96)
-$inputFileText.Width = 700
+$inputFileText.Location = New-Object System.Drawing.Point(28, 112)
+$inputFileText.Width = 760
+Set-AppTextBox -TextBox $inputFileText -ReadOnly
 $browseButton = New-Object System.Windows.Forms.Button
 $browseButton.Text = '选择文件'
 $browseButton.Anchor = 'Right,Bottom'
-$browseButton.Location = New-Object System.Drawing.Point(742, 94)
-$browseButton.Size = New-Object System.Drawing.Size(104, 28)
+$browseButton.Location = New-Object System.Drawing.Point(812, 108)
+$browseButton.Size = New-Object System.Drawing.Size(112, 34)
+Set-ModernButton -Button $browseButton -BackColor ([System.Drawing.Color]::White) -ForeColor $colorPrimaryDark -BorderColor $colorLine
 $dropPanel.Controls.Add($dropTitle)
 $dropPanel.Controls.Add($dropTip)
 $dropPanel.Controls.Add($inputFileText)
 $dropPanel.Controls.Add($browseButton)
+$dropPanel.Add_SizeChanged({
+  $browseButton.Left = [Math]::Max(560, $dropPanel.ClientSize.Width - $browseButton.Width - 28)
+  $inputFileText.Width = [Math]::Max(280, $browseButton.Left - $inputFileText.Left - 18)
+})
 $main.Controls.Add($dropPanel, 0, 2)
 
 $actionPanel = New-Object System.Windows.Forms.FlowLayoutPanel
 $actionPanel.Dock = 'Fill'
 $actionPanel.FlowDirection = 'LeftToRight'
 $actionPanel.WrapContents = $false
+$actionPanel.BackColor = $colorPage
+$actionPanel.Padding = New-Object System.Windows.Forms.Padding(0, 10, 0, 8)
 
 $generateButton = New-Object System.Windows.Forms.Button
 $generateButton.Text = '生成结算结果'
-$generateButton.Size = New-Object System.Drawing.Size(130, 36)
+$generateButton.Size = New-Object System.Drawing.Size(148, 38)
+Set-ModernButton -Button $generateButton -BackColor $colorPrimary -ForeColor ([System.Drawing.Color]::White) -BorderColor $colorPrimaryDark -Strong
 $openWeekButton = New-Object System.Windows.Forms.Button
 $openWeekButton.Text = '打开本周目录'
-$openWeekButton.Size = New-Object System.Drawing.Size(120, 36)
+$openWeekButton.Size = New-Object System.Drawing.Size(126, 38)
+Set-ModernButton -Button $openWeekButton -BackColor ([System.Drawing.Color]::White) -ForeColor $colorInk -BorderColor $colorLine
 $openSplitButton = New-Object System.Windows.Forms.Button
 $openSplitButton.Text = '商家对账单'
-$openSplitButton.Size = New-Object System.Drawing.Size(110, 36)
+$openSplitButton.Size = New-Object System.Drawing.Size(118, 38)
+Set-ModernButton -Button $openSplitButton -BackColor ([System.Drawing.Color]::White) -ForeColor $colorInk -BorderColor $colorLine
 $openSummaryButton = New-Object System.Windows.Forms.Button
 $openSummaryButton.Text = '财务汇总'
-$openSummaryButton.Size = New-Object System.Drawing.Size(96, 36)
+$openSummaryButton.Size = New-Object System.Drawing.Size(104, 38)
+Set-ModernButton -Button $openSummaryButton -BackColor ([System.Drawing.Color]::White) -ForeColor $colorInk -BorderColor $colorLine
 $openTrackButton = New-Object System.Windows.Forms.Button
 $openTrackButton.Text = '确认台账'
-$openTrackButton.Size = New-Object System.Drawing.Size(96, 36)
+$openTrackButton.Size = New-Object System.Drawing.Size(104, 38)
+Set-ModernButton -Button $openTrackButton -BackColor ([System.Drawing.Color]::White) -ForeColor $colorInk -BorderColor $colorLine
+
+Set-ControlMargin -Control $generateButton -Right 10
+Set-ControlMargin -Control $openWeekButton -Right 8
+Set-ControlMargin -Control $openSplitButton -Right 8
+Set-ControlMargin -Control $openSummaryButton -Right 8
+Set-ControlMargin -Control $openTrackButton -Right 8
 
 $actionPanel.Controls.Add($generateButton)
 $actionPanel.Controls.Add($openWeekButton)
@@ -290,6 +474,10 @@ $logBox.Dock = 'Fill'
 $logBox.Multiline = $true
 $logBox.ScrollBars = 'Vertical'
 $logBox.ReadOnly = $true
+$logBox.BorderStyle = 'FixedSingle'
+$logBox.BackColor = $colorLog
+$logBox.ForeColor = $colorInk
+$logBox.Font = New-Object System.Drawing.Font('Consolas', 10)
 $main.Controls.Add($logBox, 0, 4)
 
 $createButton.Add_Click({

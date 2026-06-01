@@ -313,7 +313,10 @@ function Write-FormattedXlsx {
 
   $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("settlement_xlsx_" + [guid]::NewGuid().ToString('N'))
   try {
-    New-Item -ItemType Directory -Force -Path $tempRoot, (Join-Path $tempRoot '_rels'), (Join-Path $tempRoot 'xl'), (Join-Path $tempRoot 'xl\_rels'), (Join-Path $tempRoot 'xl\worksheets') | Out-Null
+    $xlDir = Join-Path $tempRoot 'xl'
+    $xlRelsDir = Join-Path $xlDir '_rels'
+    $worksheetsDir = Join-Path $xlDir 'worksheets'
+    New-Item -ItemType Directory -Force -Path $tempRoot, (Join-Path $tempRoot '_rels'), $xlDir, $xlRelsDir, $worksheetsDir | Out-Null
 
     $sheetSpecs = @([PSCustomObject]@{ Name = $SheetName; Rows = $Rows; WorksheetXml = $null })
     foreach ($sheetSpec in $AdditionalSheets) {
@@ -393,10 +396,10 @@ WORKBOOK_RELATIONSHIPS
 '@
 
     [IO.File]::WriteAllText((Join-Path $tempRoot '[Content_Types].xml'), $contentTypes, [Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText((Join-Path $tempRoot '_rels\.rels'), $packageRels, [Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\workbook.xml'), $workbookXml, [Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\_rels\workbook.xml.rels'), $workbookRels, [Text.Encoding]::UTF8)
-    [IO.File]::WriteAllText((Join-Path $tempRoot 'xl\styles.xml'), $stylesXml, [Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText((Join-Path (Join-Path $tempRoot '_rels') '.rels'), $packageRels, [Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText((Join-Path $xlDir 'workbook.xml'), $workbookXml, [Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText((Join-Path $xlRelsDir 'workbook.xml.rels'), $workbookRels, [Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText((Join-Path $xlDir 'styles.xml'), $stylesXml, [Text.Encoding]::UTF8)
     for ($i = 0; $i -lt $sheetSpecs.Count; $i++) {
       $sheetNo = $i + 1
       if ($sheetSpecs[$i].WorksheetXml) {
@@ -404,7 +407,7 @@ WORKBOOK_RELATIONSHIPS
       } else {
         $worksheetXml = New-WorksheetXml -Rows $sheetSpecs[$i].Rows
       }
-      [IO.File]::WriteAllText((Join-Path $tempRoot "xl\worksheets\sheet$sheetNo.xml"), $worksheetXml, [Text.Encoding]::UTF8)
+      [IO.File]::WriteAllText((Join-Path $worksheetsDir "sheet$sheetNo.xml"), $worksheetXml, [Text.Encoding]::UTF8)
     }
 
     if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
@@ -448,6 +451,15 @@ function Add-RowToGroup {
   )
   if (-not $Groups.ContainsKey($Supplier)) { $Groups[$Supplier] = @() }
   $Groups[$Supplier] += $Row
+}
+
+function Test-IsExcludedSupplier {
+  param(
+    [string]$Supplier,
+    [hashtable]$ExcludedSuppliers
+  )
+  if ([string]::IsNullOrWhiteSpace($Supplier)) { return $false }
+  return $ExcludedSuppliers.ContainsKey($Supplier.Trim().ToUpperInvariant())
 }
 
 if (-not (Test-Path -LiteralPath $InputFile)) {
@@ -550,8 +562,15 @@ if (-not [string]::IsNullOrWhiteSpace($SupplierMapFile) -and (Test-Path -Literal
   }
 }
 
+$excludedSupplierCodes = @('QDD', 'MXC')
+$excludedSupplierMap = @{}
+foreach ($code in $excludedSupplierCodes) {
+  $excludedSupplierMap[$code.ToUpperInvariant()] = $true
+}
+
 $groups = @{}
 $skippedRows = @()
+$excludedSupplierRowCount = 0
 for ($i = 1; $i -lt $tableRows.Count; $i++) {
   $line = $tableRows[$i]
   $supplier = if ($supplierIndex -lt $line.Count) { $line[$supplierIndex] } else { '' }
@@ -567,6 +586,11 @@ for ($i = 1; $i -lt $tableRows.Count; $i++) {
 
   if ([string]::IsNullOrWhiteSpace($supplier)) {
     $skippedRows += $rowObject
+    continue
+  }
+
+  if (Test-IsExcludedSupplier -Supplier $supplier -ExcludedSuppliers $excludedSupplierMap) {
+    $excludedSupplierRowCount += 1
     continue
   }
 
@@ -608,6 +632,12 @@ if (-not [string]::IsNullOrWhiteSpace($SupplementFile) -and (Test-Path -LiteralP
     $rowObject = [PSCustomObject]$obj
     if ([string]::IsNullOrWhiteSpace($supplier)) {
       $skippedRows += $rowObject
+      $supplementSkippedCount += 1
+      continue
+    }
+
+    if (Test-IsExcludedSupplier -Supplier $supplier -ExcludedSuppliers $excludedSupplierMap) {
+      $excludedSupplierRowCount += 1
       $supplementSkippedCount += 1
       continue
     }
@@ -714,11 +744,9 @@ foreach ($supplier in ($groups.Keys | Sort-Object)) {
     结算周期 = $settlementPeriod
     商家代码 = $supplier
     商家名称 = $supplierName
-    是否已发送 = '否'
-    是否已确认 = '否'
+    是否一致 = ''
     异常类型 = ''
     异常说明 = ''
-    是否涉及漏单 = '否'
     是否已补传后台 = '否'
     备注 = ''
   }
@@ -741,6 +769,7 @@ Write-Host "拆分完成。"
 Write-Host "供应商数量：$($groups.Keys.Count)"
 Write-Host "订单行数：$(($groups.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum)"
 Write-Host "跳过空供应商或统计行：$($skippedRows.Count)"
+Write-Host "排除自有平台结算商家（$($excludedSupplierCodes -join '、')）行数：$excludedSupplierRowCount"
 Write-Host "计入本周的手工补充行：$supplementIncludedCount"
 Write-Host "未计入或跳过的手工补充行：$supplementSkippedCount"
 Write-Host "商家对账单目录：$splitDir"

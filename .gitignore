@@ -1,53 +1,30 @@
-# Root business data/source materials
+# 本地业务资料
 /aa*/
-
-# Generated weekly settlement business data
 /workspace/04_商家周结算/20*/
 
-# Build/package outputs
+# 发布包、日志和临时文件
 dist/
-
-# Heavy transfer/design artifacts
-*.exe
-!/周结算操作台.exe
-*.msi
-*.zip
-*.rar
-*.7z
-*.mp4
-*.mov
-*.avi
-*.psd
-
-# Runtime logs and local diagnostics
 *.log
 *-log.txt
 startup-error-log.txt
+*.zip
+*.rar
+*.7z
 
-# Local business notes
-目录整理规范.md
-软件使用说明.md
-项目使用入口.md
+# 只保留根目录正式启动器
+*.exe
+!/周结算操作台.exe
 
-# OS metadata
+# 系统、编辑器和 Office 临时文件
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Editor and tool caches
 .vscode/
 .idea/
-*.swp
-*.swo
 *.tmp
-*.temp
 *.bak
 *.orig
-
-# Office temporary/lock files
 ~$*
 *.asd
 *.wbk
-
-# PowerShell local history/cache
 ConsoleHost_history.txt

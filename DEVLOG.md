@@ -1,6 +1,37 @@
 # 开发日志
 
-这里记录我作为 Git 新手整理这个项目的过程。它不是只给别人看的说明书，也是给未来的自己看的学习轨迹。
+这里记录我整理这个项目的过程。它不是只给别人看的说明书，也是给未来的自己看的学习轨迹。
+
+## 2026-06-01
+
+### 今天做了什么
+
+- 优化 Windows 版周结算操作台界面，补充桌面快捷方式图标支持。
+- 精简日常使用流程，只保留新建目录、导入总对账单、生成结算结果和打开结果目录等高频入口。
+- 新增 macOS 版入口 `启动周结算操作台.command`。
+- 新增 macOS 终端菜单脚本 `run-settlement-console-macos.ps1`，复用现有拆分和汇总逻辑。
+- 新增 `MACOS使用说明.md`，记录 MacBook 上第一次安装 PowerShell、授权启动文件和日常操作步骤。
+- 调整拆分脚本中的 xlsx 临时目录路径拼接，让生成 Excel 文件的逻辑同时适配 Windows 和 macOS。
+- 更新 `README.md`，同时说明 Windows 和 macOS 两个版本的启动方式。
+
+### 学到的点
+
+- Windows Forms 依赖 Windows 桌面环境，macOS 上不能直接运行同一套 GUI。
+- PowerShell Core 可以跨平台运行脚本，适合先做一个稳定的 macOS 终端菜单版。
+- 跨平台脚本里不要把 `\` 写死进路径，优先使用 `Join-Path`。
+- Mac 终端里拖入文件时，路径里的空格可能会以 `\ ` 形式出现，需要在脚本里做一次处理。
+
+### 验证记录
+
+- 对 macOS 新增启动脚本做了 PowerShell 语法检查。
+- 对原有拆分脚本和新建目录脚本做了 PowerShell 语法检查。
+- 确认 GitHub 远端为 `https://github.com/Fisher-yo/Codex-Merchant-Settlement-System.git`。
+
+### 下一步计划
+
+- 在真正的 macOS 设备上双击 `启动周结算操作台.command` 做一次端到端试运行。
+- 用一份脱敏总对账单验证 Windows 和 macOS 生成结果是否一致。
+- 如果 macOS 终端菜单使用顺手，再考虑是否需要做原生图形界面。
 
 ## 2026-05-31
 
@@ -43,41 +74,3 @@ cd \codex\fuyu-codex\codex-list
 git status
 git commit -m "Initial project import"
 ```
-
-### 下一步计划
-
-- 配置 Git 用户名和邮箱。
-- 完成第一次提交。
-- 在 GitHub 创建仓库。
-- 优先考虑私有仓库，避免业务资料被公开。
-- 学习如何把本地仓库推送到 GitHub。
-
-## GitHub 同步准备
-
-第一次同步前，我需要确认几件事：
-
-- 是否已经配置 Git 用户名和邮箱。
-- 是否已经完成本地第一次提交。
-- GitHub 仓库是否应该设为私有。
-- 是否有合同、证件、发票、结算截图等敏感文件需要脱敏或移除。
-
-建议命令记录：
-
-```cmd
-git config --global user.name "fuyu0"
-git config --global user.email "你的邮箱"
-```
-
-完成提交：
-
-```cmd
-git commit -m "Initial project import"
-```
-
-连接 GitHub 远程仓库：
-
-```cmd
-git remote add origin https://github.com/你的用户名/你的仓库名.git
-git push -u origin main
-```
-
